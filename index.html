@@ -241,7 +241,7 @@
 </head>
 <body>
 
-    <!-- Pantalla de Login con Google -->
+    <!-- Pantalla de Login con Google (Mantiene id="login-screen" tal como pediste) -->
     <div id="login-screen">
         <div class="login-box">
             <h2>Gestor de Gastos</h2>
@@ -294,11 +294,11 @@
         <div class="container" id="tarjetas-container"></div>
     </div>
 
-    <!-- Firebase SDKs y Lógica -->
+    <!-- Firebase y Lógica de Funcionamiento -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyAYstbWfatxrM6bzhzk1UsDNXzEBbDnyUQ",
@@ -318,9 +318,456 @@
         let usuarioActual = null;
         let datos = {};
 
-        // Botón de Google Login
+        // Evento de clic en el botón de Google
         document.getElementById('google-login-btn').addEventListener('click', async () => {
             try {
                 await signInWithPopup(auth, provider);
             } catch (error) {
-                console.error("Error al
+                console.error("Error al iniciar sesión con Google:", error);
+            }
+        });
+
+        window.cerrarSesion = async function() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Error al cerrar sesión:", error);
+            }
+        };
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                usuarioActual = user.displayName || user.email.split('@')[0];
+                usuarioActual = usuarioActual.charAt(0).toUpperCase() + usuarioActual.slice(1).toLowerCase();
+
+                document.getElementById('login-screen').style.display = 'none';
+                document.getElementById('main-content').style.display = 'block';
+                document.getElementById('welcome-msg').innerText = '👤 Usuario: ' + usuarioActual;
+                
+                verificarAdmin();
+                cargarDatosFirestore();
+            } else {
+                usuarioActual = null;
+                document.getElementById('main-content').style.display = 'none';
+                document.getElementById('login-screen').style.display = 'flex';
+            }
+        });
+
+        function verificarAdmin() {
+            if (usuarioActual === 'Wilmer') {
+                document.getElementById('admin-panel').style.display = 'block';
+            } else {
+                document.getElementById('admin-panel').style.display = 'none';
+            }
+        }
+
+        function cargarDatosFirestore() {
+            const docRef = doc(db, "configuracion", "gastos_globales");
+            onSnapshot(docRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    datos = docSnap.data().contenido || {};
+                } else {
+                    datos = {
+                        viveres: { nombre: 'Víveres', limite: 900, permitidos: ['Wilmer', 'Zaida', 'Grover'], actual: { gastos: [], totalGastado: 0, fechaInicio: new Date().toLocaleDateString() }, historial: [] },
+                        bebe: { nombre: 'Bebé', limite: 300, permitidos: ['Wilmer', 'Zaida'], actual: { gastos: [], totalGastado: 0, fechaInicio: new Date().toLocaleDateString() }, historial: [] },
+                        generales: { nombre: 'Gastos Generales', limite: 300, permitidos: ['Wilmer', 'Zaida'], actual: { gastos: [], totalGastado: 0, fechaInicio: new Date().toLocaleDateString() }, historial: [] }
+                    };
+                    guardarDatos();
+                }
+                renderizarTarjetas();
+            });
+        }
+
+        async function guardarDatos() {
+            try {
+                await setDoc(doc(db, "configuracion", "gastos_globales"), { contenido: datos });
+            } catch (error) {
+                console.error("Error al guardar en Firestore:", error);
+            }
+        }
+
+        window.renderizarTarjetas = function() {
+            const container = document.getElementById('tarjetas-container');
+            container.innerHTML = '';
+
+            for (let key in datos) {
+                const cat = datos[key];
+                
+                if (!cat.permitidos) {
+                    cat.permitidos = ['Wilmer', 'Zaida', 'Grover'];
+                }
+
+                if (usuarioActual !== 'Wilmer' && !cat.permitidos.includes(usuarioActual)) {
+                    continue;
+                }
+
+                const limite = cat.limite;
+                const actual = cat.actual;
+                const total = actual.totalGastado;
+                const saldo = limite - total;
+                
+                let saldoClase = 'balance';
+                let saldoTexto = `${saldo.toFixed(2)} Bs`;
+                if (saldo <= 0) {
+                    saldoClase = 'balance low';
+                    saldoTexto = saldo === 0 ? "0 Bs" : `Excedido por ${Math.abs(saldo).toFixed(2)} Bs`;
+                } else if (saldo < (limite * 0.15)) {
+                    saldoClase = 'balance low';
+                }
+
+                let htmlCard = `
+                <div class="card" id="card-${key}">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-bottom: 15px;">
+                        <h2 style="margin: 0; border: none; padding: 0;">${cat.nombre}</h2>
+                        <div>`;
+                
+                if (usuarioActual === 'Wilmer') {
+                    htmlCard += `
+                        <button onclick="editarCategoria('${key}')" title="Editar nombre, límite o permisos" style="background:none; border:none; cursor:pointer; font-size:1.1em; margin-right: 5px;">✏️</button>
+                        <button onclick="eliminarCategoria('${key}')" title="Eliminar sección completa" style="background:none; border:none; color:#dc3545; cursor:pointer; font-size:1.1em;">🗑️</button>
+                    `;
+                }
+
+                htmlCard += `</div></div>
+                    <div class="stats">
+                        <span><strong>Límite:</strong> ${limite} Bs</span>
+                        <span><strong>Gastado:</strong> <span id="${key}-gastado">${total.toFixed(2)}</span> Bs</span>
+                    </div>
+                    
+                    <div class="saldo-caja">
+                        <span>Saldo Disponible:</span>
+                        <span class="${saldoClase}" id="${key}-saldo">${saldoTexto}</span>
+                    </div>
+
+                    <div class="input-group">
+                        <input type="text" id="${key}-desc" placeholder="Ej: Producto">
+                        <input type="number" id="${key}-monto" placeholder="Bs" min="0.1" step="0.1">
+                        <button class="add-btn" onclick="agregarGasto('${key}')">Anotar</button>
+                    </div>
+                    
+                    <ul id="${key}-lista"></ul>
+                    <button class="reset-btn" onclick="reiniciarCiclo('${key}')">CERRAR CICLO</button>
+
+                    <div class="historial-container">
+                        <h3>Historial de Ciclos (${cat.nombre})</h3>
+                        <div id="${key}-historial"></div>
+                    </div>
+                </div>`;
+
+                container.innerHTML += htmlCard;
+                poblarListaGastosYHistorial(key);
+            }
+        }
+
+        function poblarListaGastosYHistorial(categoria) {
+            const cat = datos[categoria];
+            if (!cat) return;
+            const actual = cat.actual;
+
+            const listaEl = document.getElementById(`${categoria}-lista`);
+            if (!listaEl) return;
+            listaEl.innerHTML = '';
+            
+            const gastosInvertidos = [...actual.gastos].reverse();
+            gastosInvertidos.forEach(gasto => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <div>
+                        <span class="item-desc">${gasto.desc}</span> 
+                        <span class="user-tag">(${gasto.usuario})</span>
+                    </div>
+                    <div>
+                        <span class="item-monto">-${gasto.monto.toFixed(2)} Bs</span>
+                        <button class="delete-btn" onclick="eliminarGasto('${categoria}', ${gasto.id})" title="Borrar este gasto">❌</button>
+                    </div>
+                `;
+                listaEl.appendChild(li);
+            });
+
+            const historialEl = document.getElementById(`${categoria}-historial`);
+            historialEl.innerHTML = '';
+
+            if (cat.historial.length === 0) {
+                historialEl.innerHTML = '<p style="color: #777; font-size: 0.85em;">No hay ciclos finalizados aún.</p>';
+            } else {
+                const historialInvertido = [...cat.historial].reverse();
+                historialInvertido.forEach((ciclo, indexReal) => {
+                    const indexOriginal = cat.historial.length - 1 - indexReal;
+                    
+                    let html = `<div class="ciclo-historial">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>TOTAL (${ciclo.fechaInicio} - ${ciclo.fechaFin}): ${ciclo.totalGastado.toFixed(2)} Bs</span>
+                            <div>
+                                <button onclick="toggleDetalles('${categoria}', ${indexOriginal})" style="padding: 2px 6px; font-size: 0.75em; background: #6c757d; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 4px;">Detalles</button>`;
+                    
+                    if (usuarioActual === 'Wilmer') {
+                        html += `<button class="delete-btn" onclick="eliminarHistorialCiclo('${categoria}', ${indexOriginal})" title="Borrar este historial" style="font-size: 0.9em;">❌</button>`;
+                    }
+                    
+                    html += `</div></div>`;
+
+                    html += `<div id="detalles-${categoria}-${indexOriginal}" style="display: none; margin-top: 8px; border-top: 1px dashed #ccc; padding-top: 6px;">
+                        <ul style="max-height: 120px; overflow-y: auto; background: white; border-radius: 4px; padding: 4px;">`;
+                    
+                    ciclo.gastos.forEach(g => {
+                        html += `<li style="font-size: 0.8em; padding: 4px 6px;">
+                            <div>
+                                <span class="item-desc">${g.desc}</span> 
+                                <span class="user-tag">(${g.usuario})</span>
+                            </div>
+                            <span class="item-monto">-${g.monto.toFixed(2)} Bs</span>
+                        </li>`;
+                    });
+                    
+                    html += `</ul></div></div>`;
+                    historialEl.innerHTML += html;
+                });
+            }
+        }
+
+        window.crearCategoria = function() {
+            if (usuarioActual !== 'Wilmer') return;
+            
+            const nombreInput = document.getElementById('nueva-cat-nombre');
+            const limiteInput = document.getElementById('nueva-cat-limite');
+            const zaidaCheck = document.getElementById('permiso-zaida').checked;
+            const groverCheck = document.getElementById('permiso-grover').checked;
+            
+            const nombre = nombreInput.value.trim();
+            const limite = parseFloat(limiteInput.value);
+
+            if (nombre === '' || isNaN(limite) || limite <= 0) {
+                alert('Ingresa un nombre válido y un límite en Bs mayor a 0.');
+                return;
+            }
+
+            const key = nombre.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            if (datos[key]) {
+                alert('Ya existe una sección con un nombre similar.');
+                return;
+            }
+
+            let permitidos = ['Wilmer'];
+            if (zaidaCheck) permitidos.push('Zaida');
+            if (groverCheck) permitidos.push('Grover');
+
+            datos[key] = {
+                nombre: nombre,
+                limite: limite,
+                permitidos: permitidos,
+                actual: { gastos: [], totalGastado: 0, fechaInicio: new Date().toLocaleDateString() },
+                historial: []
+            };
+
+            guardarDatos();
+            renderizarTarjetas();
+
+            nombreInput.value = '';
+            limiteInput.value = '';
+        }
+
+        window.editarCategoria = function(key) {
+            if (usuarioActual !== 'Wilmer') return;
+            const cat = datos[key];
+            if (!cat.permitidos) cat.permitidos = ['Wilmer', 'Zaida', 'Grover'];
+
+            const nuevoNombre = prompt('Modifica el nombre de la sección:', cat.nombre);
+            if (nuevoNombre === null) return;
+            if (nuevoNombre.trim() === '') {
+                alert('El nombre no puede estar vacío.');
+                return;
+            }
+
+            const nuevoLimite = prompt('Modifica el monto límite (Bs):', cat.limite);
+            if (nuevoLimite === null) return;
+            const limiteParsed = parseFloat(nuevoLimite);
+            if (isNaN(limiteParsed) || limiteParsed <= 0) {
+                alert('Ingresa un monto válido.');
+                return;
+            }
+
+            const veZaida = confirm(`¿Zaida debe tener acceso a ver esta sección?\nAceptar = Sí | Cancelar = No`);
+            const veGrover = confirm(`¿Grover debe tener acceso a ver esta sección?\nAceptar = Sí | Cancelar = No`);
+
+            let nuevosPermitidos = ['Wilmer'];
+            if (veZaida) nuevosPermitidos.push('Zaida');
+            if (veGrover) nuevosPermitidos.push('Grover');
+
+            cat.nombre = nuevoNombre.trim();
+            cat.limite = limiteParsed;
+            cat.permitidos = nuevosPermitidos;
+
+            guardarDatos();
+            renderizarTarjetas();
+        }
+
+        window.eliminarCategoria = function(key) {
+            if (usuarioActual !== 'Wilmer') return;
+            const confirmar = confirm(`¿Estás seguro de eliminar por completo la sección "${datos[key].nombre}"?`);
+            if (confirmar) {
+                delete datos[key];
+                guardarDatos();
+                renderizarTarjetas();
+            }
+        }
+
+        window.toggleDetalles = function(categoria, index) {
+            const el = document.getElementById(`detalles-${categoria}-${index}`);
+            if (el) {
+                el.style.display = el.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        window.agregarGasto = function(categoria) {
+            const descInput = document.getElementById(`${categoria}-desc`);
+            const montoInput = document.getElementById(`${categoria}-monto`);
+            
+            const desc = descInput.value.trim();
+            const monto = parseFloat(montoInput.value);
+
+            if (desc === '' || isNaN(monto) || monto <= 0) {
+                alert('Por favor ingresa qué compraste y un costo válido mayor a 0.');
+                return;
+            }
+
+            const nuevoGasto = {
+                id: Date.now(),
+                desc: desc,
+                monto: monto,
+                usuario: usuarioActual
+            };
+
+            datos[categoria].actual.gastos.push(nuevoGasto);
+            datos[categoria].actual.totalGastado += monto;
+            
+            guardarDatos();
+            renderizarTarjetas();
+        }
+
+        window.eliminarGasto = function(categoria, idGasto) {
+            const index = datos[categoria].actual.gastos.findIndex(g => g.id === idGasto);
+            if (index !== -1) {
+                const confirmar = confirm('¿Estás seguro de que deseas eliminar este gasto? Se devolverá el monto al saldo.');
+                if (confirmar) {
+                    const monto = datos[categoria].actual.gastos[index].monto;
+                    datos[categoria].actual.totalGastado -= monto;
+                    datos[categoria].actual.gastos.splice(index, 1);
+                    guardarDatos();
+                    renderizarTarjetas();
+                }
+            }
+        }
+
+        window.eliminarHistorialCiclo = function(categoria, index) {
+            if (usuarioActual !== 'Wilmer') {
+                alert('Solo el usuario Wilmer tiene permiso para eliminar registros del historial.');
+                return;
+            }
+            const confirmar = confirm('¿Estás seguro de eliminar este registro del historial?');
+            if (confirmar) {
+                datos[categoria].historial.splice(index, 1);
+                guardarDatos();
+                renderizarTarjetas();
+            }
+        }
+
+        window.reiniciarCiclo = function(categoria) {
+            const cat = datos[categoria];
+            const confirmar = confirm(`¿Estás seguro de cerrar el ciclo actual de ${cat.nombre}?\nEsto guardará los detalles en el Historial y volverá tu saldo a ${cat.limite} Bs.`);
+            
+            if (confirmar) {
+                const fechaFin = new Date().toLocaleDateString();
+                
+                if (cat.actual.gastos.length > 0) {
+                    const cicloFinalizado = {
+                        fechaInicio: cat.actual.fechaInicio,
+                        fechaFin: fechaFin,
+                        totalGastado: cat.actual.totalGastado,
+                        gastos: [...cat.actual.gastos]
+                    };
+                    cat.historial.push(cicloFinalizado);
+                }
+
+                cat.actual = { 
+                    gastos: [], 
+                    totalGastado: 0, 
+                    fechaInicio: fechaFin 
+                };
+                
+                guardarDatos();
+                renderizarTarjetas();
+            }
+        }
+
+        window.buscarGastos = function() {
+            const queryVal = document.getElementById('input-buscador').value.trim().toLowerCase();
+            const resultadosEl = document.getElementById('resultados-busqueda');
+            
+            if (queryVal === '') {
+                resultadosEl.style.display = 'none';
+                resultadosEl.innerHTML = '';
+                return;
+            }
+
+            let resultados = [];
+
+            for (let key in datos) {
+                const cat = datos[key];
+                
+                if (usuarioActual !== 'Wilmer' && cat.permitidos && !cat.permitidos.includes(usuarioActual)) {
+                    continue;
+                }
+                
+                cat.actual.gastos.forEach(g => {
+                    if (g.desc.toLowerCase().includes(queryVal)) {
+                        resultados.push({
+                            catNombre: cat.nombre,
+                            desc: g.desc,
+                            monto: g.monto,
+                            usuario: g.usuario,
+                            periodo: 'Ciclo Actual'
+                        });
+                    }
+                });
+
+                cat.historial.forEach(ciclo => {
+                    ciclo.gastos.forEach(g => {
+                        if (g.desc.toLowerCase().includes(queryVal)) {
+                            resultados.push({
+                                catNombre: cat.nombre,
+                                desc: g.desc,
+                                monto: g.monto,
+                                usuario: g.usuario,
+                                periodo: `Historial (${ciclo.fechaInicio} - ${ciclo.fechaFin})`
+                            });
+                        }
+                    });
+                });
+            }
+
+            resultadosEl.style.display = 'block';
+            if (resultados.length === 0) {
+                resultadosEl.innerHTML = '<p style="color: #777; font-size: 0.9em; margin: 5px 0;">No se encontraron coincidencias.</p>';
+            } else {
+                let html = '<ul style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 5px; background: #fafafa;">';
+                resultados.forEach(r => {
+                    html += `<li style="font-size: 0.85em; padding: 6px; border-bottom: 1px solid #eee;">
+                        <div>
+                            <strong>${r.desc}</strong> <span style="color: #007bff;">[${r.catNombre}]</span> <span class="user-tag">(${r.usuario} - ${r.periodo})</span>
+                        </div>
+                        <span class="item-monto">${r.monto.toFixed(2)} Bs</span>
+                    </li>`;
+                });
+                html += '</ul>';
+                resultadosEl.innerHTML = html;
+            }
+        }
+
+        window.limpiarBuscador = function() {
+            document.getElementById('input-buscador').value = '';
+            document.getElementById('resultados-busqueda').style.display = 'none';
+            document.getElementById('resultados-busqueda').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
