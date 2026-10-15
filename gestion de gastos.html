@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Gastos Familiar</title>
+    <!-- Tailwind CSS para un diseño moderno -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col justify-between">
+
+    <!-- Contenedor Principal -->
+    <div id="app" class="container mx-auto p-4 max-w-2xl">
+        <header class="text-center py-6">
+            <h1 class="text-3xl font-bold text-blue-600">Gestión de Gastos Familiar</h1>
+            <p class="text-gray-600">Controla y sincroniza los gastos del hogar en tiempo real</p>
+        </header>
+
+        <!-- Sección de Autenticación -->
+        <div id="auth-section" class="bg-white p-6 rounded-lg shadow-md mb-6 text-center">
+            <div id="logged-out">
+                <p class="mb-4 text-gray-700">Inicia sesión con Google para sincronizar los datos familiares.</p>
+                <button id="login-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded transition duration-200">
+                    Iniciar sesión con Google
+                </button>
+            </div>
+            <div id="logged-in" class="hidden">
+                <p class="mb-2 text-gray-700">Bienvenido, <span id="user-name" class="font-semibold"></span></p>
+                <button id="logout-btn" class="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded transition duration-200">
+                    Cerrar sesión
+                </button>
+            </div>
+        </div>
+
+        <!-- Formulario y Listado (Ocultos hasta iniciar sesión) -->
+        <div id="dashboard" class="hidden">
+            <!-- Formulario de Ingreso de Gastos -->
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6">
+                <h2 class="text-xl font-semibold mb-4 text-gray-800">Agregar Nuevo Gasto</h2>
+                <form id="expense-form" class="space-y-4">
+                    <div>
+                        <label class="block text-gray-700 font-medium mb-1">Descripción</label>
+                        <input type="text" id="description" required class="w-full border border-gray-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. Supermercado">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 font-medium mb-1">Monto ($)</label>
+                        <input type="number" step="0.01" id="amount" required class="w-full border border-gray-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="0.00">
+                    </div>
+                    <div>
+                        <label class="block text-gray-700 font-medium mb-1">Categoría</label>
+                        <select id="category" class="w-full border border-gray-300 rounded p-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="Alimentos">Alimentos</option>
+                            <option value="Servicios">Servicios</option>
+                            <option value="Entretenimiento">Entretenimiento</option>
+                            <option value="Transporte">Transporte</option>
+                            <option value="Otros">Otros</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded transition duration-200">
+                        Guardar Gasto
+                    </button>
+                </form>
+            </div>
+
+            <!-- Resumen y Listado de Gastos -->
+            <div class="bg-white p-6 rounded-lg shadow-md">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold text-gray-800">Historial de Gastos</h2>
+                    <span class="text-lg font-bold text-gray-700">Total: $<span id="total-amount">0.00</span></span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-gray-200 text-gray-700">
+                                <th class="p-2 border-b">Descripción</th>
+                                <th class="p-2 border-b">Categoría</th>
+                                <th class="p-2 border-b">Monto</th>
+                                <th class="p-2 border-b">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="expense-list">
+                            <!-- Los gastos se cargarán aquí dinámicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="text-center py-4 text-gray-500 text-sm">
+        Sincronizado con Firebase Firestore
+    </footer>
+
+    <!-- Firebase SDKs (Modular v10) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Configuración de Firebase con tus credenciales
+        const firebaseConfig = {
+            apiKey: "AIzaSyAYstbWfatxrM6bzhzk1UsDNXzEBbDnyUQ",
+            authDomain: "gestion-de-gastos-b3612.firebaseapp.com",
+            projectId: "gestion-de-gastos-b3612",
+            storageBucket: "gestion-de-gastos-b3612.firebasestorage.app",
+            messagingSenderId: "273505878779",
+            appId: "1:273505878779:web:9ec9964abf65eb843ee65e",
+            measurementId: "G-TN6TF26WQ0"
+        };
+
+        // Inicializar Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const provider = new GoogleAuthProvider();
+
+        // Elementos del DOM
+        const loginBtn = document.getElementById('login-btn');
+        const logoutBtn = document.getElementById('logout-btn');
+        const loggedOutDiv = document.getElementById('logged-out');
+        const loggedInDiv = document.getElementById('logged-in');
+        const userNameSpan = document.getElementById('user-name');
+        const dashboardDiv = document.getElementById('dashboard');
+        const expenseForm = document.getElementById('expense-form');
+        const expenseList = document.getElementById('expense-list');
+        const totalAmountSpan = document.getElementById('total-amount');
+
+        // Autenticación: Login con Google
+        loginBtn.addEventListener('click', async () => {
+            try {
+                await signInWithPopup(auth, provider);
+            } catch (error) {
+                console.error("Error al iniciar sesión:", error);
+            }
+        });
+
+        // Autenticación: Logout
+        logoutBtn.addEventListener('click', async () => {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                console.error("Error al cerrar sesión:", error);
+            }
+        });
+
+        // Observador del estado de autenticación
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                loggedOutDiv.classList.add('hidden');
+                loggedInDiv.classList.remove('hidden');
+                dashboardDiv.classList.remove('hidden');
+                userNameSpan.textContent = user.displayName;
+                cargarGastos();
+            } else {
+                loggedOutDiv.classList.remove('hidden');
+                loggedInDiv.classList.add('hidden');
+                dashboardDiv.classList.add('hidden');
+                expenseList.innerHTML = '';
+                totalAmountSpan.textContent = '0.00';
+            }
+        });
+
+        // Agregar un gasto
+        expenseForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const description = document.getElementById('description').value;
+            const amount = parseFloat(document.getElementById('amount').value);
+            const category = document.getElementById('category').value;
+
+            try {
+                await addDoc(collection(db, "gastos"), {
+                    description,
+                    amount,
+                    category,
+                    createdAt: new Date()
+                });
+                expenseForm.reset();
+            } catch (error) {
+                console.error("Error al agregar gasto: ", error);
+            }
+        });
+
+        // Cargar y escuchar cambios en tiempo real desde Firestore
+        function cargarGastos() {
+            const q = query(collection(db, "gastos"), orderBy("createdAt", "desc"));
+            onSnapshot(q, (snapshot) => {
+                let html = '';
+                let total = 0;
+                snapshot.forEach((docSnap) => {
+                    const gasto = docSnap.data();
+                    total += gasto.amount;
+                    html += `
+                        <tr class="border-b hover:bg-gray-50">
+                            <td class="p-2">${gasto.description}</td>
+                            <td class="p-2"><span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">${gasto.category}</span></td>
+                            <td class="p-2 font-semibold">$${gasto.amount.toFixed(2)}</td>
+                            <td class="p-2">
+                                <button onclick="eliminarGasto('${docSnap.id}')" class="text-red-500 hover:text-red-700 text-sm font-bold">Eliminar</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                expenseList.innerHTML = html;
+                totalAmountSpan.textContent = total.toFixed(2);
+            });
+        }
+
+        // Eliminar gasto expuesto globalmente
+        window.eliminarGasto = async function(id) {
+            try {
+                await deleteDoc(doc(db, "gastos", id));
+            } catch (error) {
+                console.error("Error al eliminar el gasto: ", error);
+            }
+        }
+    </script>
+</body>
+</html>
